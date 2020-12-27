@@ -1,0 +1,141 @@
+/* Wav file to C Header file converter
+ *
+ * This program opens Wave file and places every sample in it 
+ * in an array!
+ *
+ * Based on "PCM to Header file converter" from 2007/08 by Joao Figueiredo
+ *
+ * 2015/03 Automatic conversion from Wav throught PCM to Header file
+           by M.Filipiak
+ */
+#include<stdio.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<unistd.h>
+#include<libgen.h>
+#include<string.h>
+#include<errno.h>
+#include<ctype.h>
+
+void printSafeName(char *name, FILE *fp)
+{
+	unsigned int i;
+	char *bname;
+
+	bname = basename(name);
+
+	for(i=0; i<strlen(bname) && bname[i]!='.'; i++)
+	{
+		fprintf(fp, "%c", bname[i]);
+	}
+}
+
+void printCapsDefineName(char *name, FILE *fp)
+{
+	unsigned int i;
+	char *bname;
+
+	bname = basename(name);
+
+	for(i=0; i<strlen(bname); i++)
+	{
+		if(bname[i]=='.')
+			fprintf(fp, "_");
+		else
+			fprintf(fp, "%c", toupper(bname[i]));
+	}
+}
+
+int main(int argc, char *argv[])
+{
+	FILE *headerFile=NULL;
+	FILE *pcmFile=NULL;
+	struct stat statData;
+
+	//int type;
+        int colBreak = 0;
+
+	/* test arguments */
+	if((argc==2 && strcmp(argv[1], "-h")==0) || argc<3)
+	{
+		printf("wav2h - writes wav files as .h header files\n");
+		printf("Usage: %s file.wav file.h\n", basename(argv[0]));
+		return -1;
+	}
+
+	/* open output file */
+	if( (headerFile = fopen(argv[argc-1], "w")) == NULL)
+	{
+		int e=errno;
+		printf("Error: %s: Can't open output file!\n", strerror(e));
+		return -2;
+	}
+
+	/* write .h header */
+	fprintf(headerFile, "#ifndef "); printCapsDefineName(argv[argc-1], headerFile);
+	fprintf(headerFile, "\n#define "); printCapsDefineName(argv[argc-1], headerFile);
+	fprintf(headerFile, "\n\n");
+
+
+	/*change wav to 8 bit wav and 8000 probing*/
+	printf("\n\nChangeing file %s to 8bit.\n\n", argv[1]);
+	char comd[80] = " ";
+	const char *inputfile = argv[1];
+	strcpy(comd," sox ");
+	strcat(comd,inputfile);
+	strcat(comd," -r 8000 -b8 temp.wav \n");
+	system (comd);
+	
+	/* get file size */
+	if( stat("temp.wav", &statData) < 0)
+	{
+		int e=errno;
+		printf("Error: %s: Can't stat file %s.\n", strerror(e), argv[1]);
+		return -3;
+	
+	}
+	
+	/*change wav to pcm*/
+	printf("\n\nCreate PCM from 8bit WAV.\n\n");
+	system ("mplayer temp.wav -ao pcm:nowaveheader:file=temp.pcm \n");
+
+	
+	/* open pcm file */
+        printf("\n\nCreate Header from PCM\n\n");
+	if( (pcmFile = fopen("temp.pcm", "rb")) == NULL)
+	{
+		int e=errno;
+		printf("Error: %s: Can't open file\n", strerror(e));
+		return -4;
+	}
+
+	
+	unsigned int c;
+
+	fprintf(headerFile, "const char ");
+	printSafeName(argv[1], headerFile);
+	fprintf(headerFile, "[%u]={", (unsigned int) statData.st_size);
+
+	c = fgetc(pcmFile);
+	fprintf(headerFile, "0x%02X", c);
+
+	while( (c=fgetc(pcmFile)) != EOF )
+	{
+		fprintf(headerFile, ",%s 0x%02X", ((++colBreak % 16) == 0?"\n":""), c);
+	}
+
+	fprintf(headerFile, "};\n\n");
+
+	fclose(pcmFile);
+
+
+
+	/* write .h footer */
+	fprintf(headerFile, "#endif\n");
+	fclose(headerFile);
+	
+	system ("rm temp.wav temp.pcm");
+
+	printf("\n\nAll done!\n\n");
+	return 0;
+}
